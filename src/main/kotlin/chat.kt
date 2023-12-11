@@ -1,6 +1,7 @@
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
+import java.nio.charset.Charset
 import java.util.Scanner
 import kotlin.concurrent.thread
 
@@ -53,12 +54,12 @@ class ChatServer {
 
     fun removeRoom(room: Room) {}
 
-    fun joinedRoom(client: Client, roomName: String) {
-        var room = isExistedRoom(roomName)
-        if (room != null) {
-            room.join(client)
-        }
-    }
+//    fun joinedRoom(client: Client, roomName: String) {
+//        var room = isExistedRoom(roomName)
+//        if (room != null) {
+//            room.join(client)
+//        }
+//    }
 
     fun leavedRoom(client: Client, roomName: String) {}
 
@@ -72,6 +73,7 @@ class ChatServer {
     }
 
     private fun initRoom() {
+        addRoom(Room("default"))
         addRoom(Room("room1"))
         addRoom(Room("room2"))
     }
@@ -96,14 +98,14 @@ data class Room(var name: String) {
 }
 
 data class Client(var name: String, val connection: Socket) {
-    var joinedRoomList = mutableListOf<Room>()
+    var joinedRoom = Room("default")
 
     fun remave(_name: String) {
         name = _name
     }
 
     fun joinRoom(room: Room) {
-        joinedRoomList.add(room)
+        joinedRoom = room
     }
 }
 
@@ -128,29 +130,64 @@ class MessageHandler(val cSocket: Socket) {
     private var client: Client = Client("", cSocket)
     fun run() {
         while (running) {
+            if (client.joinedRoom != null) {
+                prompt("${client.joinedRoom?.name}>", writer)
+            } else {
+                write(">", writer)
+            }
+
             val msg = reader.nextLine()
             if (msg.startsWith(Command.login.name, true)) {
                 val name = msg.substring(Command.join.name.length + 1)
                 client.remave(name)
                 server.login(client)
+                println()
                 continue
             }
             if (msg == Command.logout.name) {
                 server.logout(client)
-                continue
-            }
-            if (msg == Command.leave.name) {
-                leave()
+                println()
                 continue
             }
             if (msg.startsWith(Command.join.name, true)) {
                 val roomName = msg.substring(Command.join.name.length + 1)
-                server.joinedRoom(client, roomName)
+                val room = server.isExistedRoom(roomName)
+                if (room == null) {
+                    println()
+                    continue
+                }
+                room.join(client)
+                client.joinRoom(room)
+                println()
+                continue
+            }
+            if (msg == Command.leave.name) {
+                leave()
+                println()
                 continue
             }
 
-            println(msg)
+            broadcast(msg, client.joinedRoom)
         }
+    }
+
+    private fun prompt(msg: String, writer: OutputStream) {
+        writer.write((msg).toByteArray(Charset.defaultCharset()))
+    }
+    private fun broadcast(msg: String, room: Room) {
+        for (c in room.joinedClientList) {
+            if (c == client) break
+            val writer = c.connection.getOutputStream()
+            write(msg, writer)
+        }
+    }
+
+    private fun write(msg: String, writer: OutputStream, lineSeparator: Boolean = true) {
+        var _msg = "[${client.name}]${msg}"
+        if (lineSeparator) {
+            _msg = _msg + '\n'
+        }
+        writer.write((_msg).toByteArray(Charset.defaultCharset()))
     }
 
     private fun leave() {
